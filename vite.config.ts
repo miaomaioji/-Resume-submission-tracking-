@@ -10,7 +10,7 @@ import { fileURLToPath, URL } from 'node:url'
 const isCap = !!process.env.CAP
 
 export default defineConfig(({ command }) => ({
-  base: isCap ? './' : command === 'build' ? '/-Resume-submission-tracking-/' : '/',
+  base: isCap ? './' : command === 'build' ? '/Resume-submission-tracking/' : '/',
   plugins: [
     react(),
     tailwindcss(),
