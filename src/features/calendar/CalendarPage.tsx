@@ -7,6 +7,8 @@ import 'react-big-calendar/lib/css/react-big-calendar.css'
 import { useApplications } from '@/hooks/useData'
 import { useUiStore } from '@/app/uiStore'
 import { findInterviewConflicts } from '@/domain/conflicts'
+import { buildInterviewIcs, downloadIcs } from '@/lib/ics'
+import { IconDownload } from '@tabler/icons-react'
 
 dayjs.extend(localizedFormat)
 const localizer = dayjsLocalizer(dayjs)
@@ -66,8 +68,28 @@ export function CalendarPage() {
 
   const conflicts = useMemo(() => findInterviewConflicts(apps), [apps])
 
+  function onExportIcs() {
+    const ics = buildInterviewIcs(apps)
+    if (!ics) {
+      alert('暂无可导出的面试时间')
+      return
+    }
+    downloadIcs(ics)
+  }
+
   return (
     <div className="space-y-3">
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={onExportIcs}
+          className="flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm"
+          style={{ borderColor: 'var(--border)' }}
+        >
+          <IconDownload size={15} />
+          导出 .ics
+        </button>
+      </div>
       {conflicts.length > 0 && (
         <div
           className="rounded-md border p-2 text-sm"

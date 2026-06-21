@@ -16,3 +16,40 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
+/* react-big-calendar 跟随设计 token(浅/深色一致) */
+.rbc-calendar {
+  color: var(--text);
+}
+.rbc-off-range-bg {
+  background: var(--bg);
+}
+.rbc-off-range {
+  color: var(--text-muted);
+}
+.rbc-today {
+  background: color-mix(in srgb, var(--info) 14%, transparent);
+}
+.rbc-header,
+.rbc-month-view,
+.rbc-month-row,
+.rbc-day-bg + .rbc-day-bg,
+.rbc-header + .rbc-header,
+.rbc-time-view,
+.rbc-time-content,
+.rbc-time-header-content,
+.rbc-timeslot-group {
+  border-color: var(--border) !important;
+}
+.rbc-toolbar button {
+  color: var(--text);
+  border-color: var(--border);
+}
+.rbc-toolbar button:hover {
+  background: var(--bg);
+}
+.rbc-toolbar button.rbc-active,
+.rbc-toolbar button.rbc-active:hover {
+  background: var(--primary);
+  color: var(--bg);
+}
