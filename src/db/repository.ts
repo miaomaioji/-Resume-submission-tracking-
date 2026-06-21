@@ -1,7 +1,7 @@
 import { db } from './schema'
 import { DEFAULT_CHANNELS, DEFAULT_TIMEOUT, type Status } from '@/domain/enums'
 import { nowIso, uid } from '@/domain/id'
-import type { Application, Channel, Contact, Settings, TimelineEvent } from '@/domain/types'
+import type { Application, Channel, Contact, Settings, Tag, TimelineEvent } from '@/domain/types'
 
 /**
  * 数据访问抽象。MVP 用本地(Dexie)实现;未来自建后端时新增远端实现,UI/领域层不变。
@@ -23,6 +23,14 @@ export interface Repository {
   addContact(c: Omit<Contact, 'id'>): Promise<void>
   deleteContact(id: string): Promise<void>
   addNote(applicationId: string, note: string): Promise<void>
+  listTags(): Promise<Tag[]>
+  createTag(name: string, color: string): Promise<Tag>
+  deleteTag(id: string): Promise<void>
+  addTagToApplication(appId: string, tagId: string): Promise<void>
+  removeTagFromApplication(appId: string, tagId: string): Promise<void>
+  bulkSetStatus(ids: string[], status: Status): Promise<void>
+  bulkAddTag(ids: string[], tagId: string): Promise<void>
+  bulkSoftDelete(ids: string[]): Promise<void>
 }
 
 export const SETTINGS_DEFAULT: Settings = {
@@ -126,6 +134,87 @@ class LocalRepository implements Repository {
   async addNote(applicationId: string, note: string) {
     const ts = nowIso()
     await db.events.add({ id: uid(), applicationId, type: 'note', at: ts, note, createdAt: ts })
+  }
+
+  listTags() {
+    return db.tags.toArray()
+  }
+
+  async createTag(name: string, color: string) {
+    const tag: Tag = { id: uid(), name, color }
+    await db.tags.add(tag)
+    return tag
+  }
+
+  async deleteTag(id: string) {
+    await db.transaction('rw', db.tags, db.applications, async () => {
+      await db.tags.delete(id)
+      const affected = await db.applications.filter((a) => a.tagIds?.includes(id)).toArray()
+      for (const a of affected) {
+        await db.applications.update(a.id, { tagIds: a.tagIds.filter((t) => t !== id), updatedAt: nowIso() })
+      }
+    })
+  }
+
+  async addTagToApplication(appId: string, tagId: string) {
+    const a = await db.applications.get(appId)
+    if (!a || a.tagIds.includes(tagId)) return
+    await db.applications.update(appId, {
+      tagIds: [...a.tagIds, tagId],
+      updatedAt: nowIso(),
+      version: a.version + 1,
+    })
+  }
+
+  async removeTagFromApplication(appId: string, tagId: string) {
+    const a = await db.applications.get(appId)
+    if (!a) return
+    await db.applications.update(appId, {
+      tagIds: a.tagIds.filter((t) => t !== tagId),
+      updatedAt: nowIso(),
+      version: a.version + 1,
+    })
+  }
+
+  async bulkSetStatus(ids: string[], status: Status) {
+    await db.transaction('rw', db.applications, db.events, async () => {
+      for (const id of ids) {
+        const a = await db.applications.get(id)
+        if (!a || a.status === status) continue
+        const ts = nowIso()
+        await db.applications.update(id, { status, updatedAt: ts, version: a.version + 1 })
+        await db.events.add({
+          id: uid(),
+          applicationId: id,
+          type: 'status_change',
+          at: ts,
+          fromStatus: a.status,
+          toStatus: status,
+          createdAt: ts,
+        })
+      }
+    })
+  }
+
+  async bulkAddTag(ids: string[], tagId: string) {
+    await db.transaction('rw', db.applications, async () => {
+      for (const id of ids) {
+        const a = await db.applications.get(id)
+        if (!a || a.tagIds.includes(tagId)) continue
+        await db.applications.update(id, {
+          tagIds: [...a.tagIds, tagId],
+          updatedAt: nowIso(),
+          version: a.version + 1,
+        })
+      }
+    })
+  }
+
+  async bulkSoftDelete(ids: string[]) {
+    const ts = nowIso()
+    await db.transaction('rw', db.applications, async () => {
+      for (const id of ids) await db.applications.update(id, { deletedAt: ts })
+    })
   }
 }
 

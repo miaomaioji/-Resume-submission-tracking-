@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { IconTrash } from '@tabler/icons-react'
 import { repo } from '@/db/repository'
-import { useContacts, useEvents } from '@/hooks/useData'
+import { useContacts, useEvents, useTags } from '@/hooks/useData'
 import { formatDateTime } from '@/lib/format'
 import { STATUS_LABEL_ZH, type Status } from '@/domain/enums'
 import type { Application } from '@/domain/types'
+import { TagChips, pickTagColor } from '@/components/TagChips'
 
 const inputCls = 'rounded border px-2 py-1 text-sm'
 const inputStyle = { borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--text)' }
@@ -15,6 +16,8 @@ export function DetailPanel({ app }: { app: Application }) {
   const contacts = useContacts(app.id)
   const [note, setNote] = useState('')
   const [c, setC] = useState(emptyContact)
+  const tags = useTags()
+  const [tagInput, setTagInput] = useState('')
 
   const lastChange = [...events].reverse().find((e) => e.type === 'status_change')
   const since = lastChange?.at ?? app.createdAt
@@ -37,6 +40,14 @@ export function DetailPanel({ app }: { app: Application }) {
       email: c.email.trim() || undefined,
     })
     setC(emptyContact)
+  }
+  async function addTag() {
+    const name = tagInput.trim()
+    if (!name) return
+    const existing = tags.find((t) => t.name === name)
+    const tag = existing ?? (await repo.createTag(name, pickTagColor(tags.length)))
+    await repo.addTagToApplication(app.id, tag.id)
+    setTagInput('')
   }
 
   return (
@@ -92,6 +103,47 @@ export function DetailPanel({ app }: { app: Application }) {
       </div>
 
       <div>
+        <h4
+          className="mb-2 text-xs font-semibold uppercase tracking-wide"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          标签
+        </h4>
+        <TagChips
+          tagIds={app.tagIds}
+          tags={tags}
+          onRemove={(tid) => repo.removeTagFromApplication(app.id, tid)}
+        />
+        <div className="mb-4 mt-2 flex gap-2">
+          <input
+            className={inputCls}
+            style={inputStyle}
+            list={`dp-tags-${app.id}`}
+            placeholder="标签名,回车添加"
+            value={tagInput}
+            onChange={(e) => setTagInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                void addTag()
+              }
+            }}
+          />
+          <datalist id={`dp-tags-${app.id}`}>
+            {tags.map((t) => (
+              <option key={t.id} value={t.name} />
+            ))}
+          </datalist>
+          <button
+            type="button"
+            onClick={addTag}
+            className="rounded border px-3 text-sm"
+            style={{ borderColor: 'var(--border)' }}
+          >
+            添加
+          </button>
+        </div>
+
         <h4
           className="mb-2 text-xs font-semibold uppercase tracking-wide"
           style={{ color: 'var(--text-muted)' }}

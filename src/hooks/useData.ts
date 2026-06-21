@@ -25,3 +25,8 @@ export function useEvents(appId: string) {
 export function useContacts(appId: string) {
   return useLiveQuery(() => repo.listContacts(appId), [appId], [])
 }
+
+/** 全部标签(响应式)。 */
+export function useTags() {
+  return useLiveQuery(() => repo.listTags(), [], [])
+}

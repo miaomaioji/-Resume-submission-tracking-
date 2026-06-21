@@ -6,6 +6,7 @@ import {
   getFilteredRowModel,
   getSortedRowModel,
   useReactTable,
+  type RowSelectionState,
   type SortingState,
 } from '@tanstack/react-table'
 import dayjs from 'dayjs'
@@ -20,7 +21,7 @@ import {
   IconTrash,
   IconUpload,
 } from '@tabler/icons-react'
-import { useApplications, useChannels, useSettings } from '@/hooks/useData'
+import { useApplications, useChannels, useSettings, useTags } from '@/hooks/useData'
 import { repo } from '@/db/repository'
 import { migrateLegacy } from '@/db/migrate-legacy'
 import { downloadBackup, exportBackup, importBackup } from '@/lib/backup'
@@ -28,6 +29,7 @@ import { StatsCards } from './StatsCards'
 import { EntryForm } from '@/features/entry/EntryForm'
 import { EditableCell } from './EditableCell'
 import { DetailPanel } from './DetailPanel'
+import { TagChips } from '@/components/TagChips'
 import { EDITABLE_IDS, GridContext, type EditPos, type GridApi } from './grid'
 import { formatSalary } from '@/lib/format'
 import { TIMEOUT_COLORS, timeoutLevel } from '@/domain/timeout'
@@ -36,25 +38,37 @@ import type { Application } from '@/domain/types'
 
 const columnHelper = createColumnHelper<Application>()
 
+const selStyle = { accentColor: 'var(--primary)' }
+
 export function TablePage() {
   const apps = useApplications()
   const settings = useSettings()
   const channels = useChannels()
+  const tags = useTags()
   const [sorting, setSorting] = useState<SortingState>([])
   const [globalFilter, setGlobalFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<Status | ''>('')
+  const [tagFilter, setTagFilter] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [editingApp, setEditingApp] = useState<Application | undefined>()
   const [initial, setInitial] = useState<Partial<Application> | undefined>()
   const [importMsg, setImportMsg] = useState('')
   const [edit, setEdit] = useState<EditPos | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   const fileRef = useRef<HTMLInputElement>(null)
 
   const data = useMemo(
-    () => (statusFilter ? apps.filter((a) => a.status === statusFilter) : apps),
-    [apps, statusFilter],
+    () =>
+      apps.filter(
+        (a) =>
+          (!statusFilter || a.status === statusFilter) &&
+          (!tagFilter || a.tagIds.includes(tagFilter)),
+      ),
+    [apps, statusFilter, tagFilter],
   )
+
+  const selectedIds = Object.keys(rowSelection)
 
   function toggleExpand(id: string) {
     setExpanded((prev) => {
@@ -115,8 +129,50 @@ export function TablePage() {
     e.target.value = ''
   }
 
+  async function onBulkStatus(e: ChangeEvent<HTMLSelectElement>) {
+    const v = e.target.value as Status
+    if (!v) return
+    await repo.bulkSetStatus(selectedIds, v)
+    setRowSelection({})
+  }
+  async function onBulkTag(e: ChangeEvent<HTMLSelectElement>) {
+    const id = e.target.value
+    if (!id) return
+    await repo.bulkAddTag(selectedIds, id)
+    setRowSelection({})
+  }
+  async function onBulkDelete() {
+    if (!confirm(`确认删除选中的 ${selectedIds.length} 条记录?`)) return
+    await repo.bulkSoftDelete(selectedIds)
+    setRowSelection({})
+  }
+
   const columns = useMemo(
     () => [
+      columnHelper.display({
+        id: 'select',
+        header: ({ table }) => (
+          <input
+            type="checkbox"
+            style={selStyle}
+            checked={table.getIsAllRowsSelected()}
+            ref={(el) => {
+              if (el) el.indeterminate = table.getIsSomeRowsSelected() && !table.getIsAllRowsSelected()
+            }}
+            onChange={table.getToggleAllRowsSelectedHandler()}
+            aria-label="全选"
+          />
+        ),
+        cell: ({ row }) => (
+          <input
+            type="checkbox"
+            style={selStyle}
+            checked={row.getIsSelected()}
+            onChange={row.getToggleSelectedHandler()}
+            aria-label="选择行"
+          />
+        ),
+      }),
       columnHelper.display({
         id: 'expander',
         header: '',
@@ -170,6 +226,11 @@ export function TablePage() {
         cell: (i) => <EditableCell app={i.row.original} field="notes" type="text" />,
       }),
       columnHelper.display({
+        id: 'tags',
+        header: '标签',
+        cell: ({ row }) => <TagChips tagIds={row.original.tagIds} tags={tags} />,
+      }),
+      columnHelper.display({
         id: 'actions',
         header: '',
         cell: ({ row }) => (
@@ -196,15 +257,18 @@ export function TablePage() {
         ),
       }),
     ],
-    [expanded],
+    [expanded, tags],
   )
 
   const table = useReactTable({
     data,
     columns,
-    state: { sorting, globalFilter },
+    getRowId: (row) => row.id,
+    state: { sorting, globalFilter, rowSelection },
     onSortingChange: setSorting,
     onGlobalFilterChange: setGlobalFilter,
+    onRowSelectionChange: setRowSelection,
+    enableRowSelection: true,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
@@ -254,7 +318,6 @@ export function TablePage() {
           }
         } finally {
           if (move === 'none') {
-            // 仅当仍停留在本单元格时才关闭(避免异步提交覆盖刚点开的另一个单元格)
             setEdit((prev) => (prev?.rowId === app.id && prev?.colId === field ? null : prev))
           } else {
             setEdit(neighbor(app.id, field, move))
@@ -296,6 +359,21 @@ export function TablePage() {
             </option>
           ))}
         </select>
+        {tags.length > 0 && (
+          <select
+            value={tagFilter}
+            onChange={(e) => setTagFilter(e.target.value)}
+            className="rounded-md border px-2 py-1.5 text-sm"
+            style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}
+          >
+            <option value="">全部标签</option>
+            {tags.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        )}
         <div className="ml-auto flex flex-wrap gap-2">
           <button
             type="button"
@@ -350,13 +428,67 @@ export function TablePage() {
           </button>
         </div>
       </div>
+
+      {selectedIds.length > 0 && (
+        <div
+          className="flex flex-wrap items-center gap-2 rounded-md border p-2 text-sm"
+          style={{ borderColor: 'var(--info)', background: 'var(--surface)' }}
+        >
+          <span className="font-medium">已选 {selectedIds.length} 项</span>
+          <select
+            value=""
+            onChange={onBulkStatus}
+            className="rounded-md border px-2 py-1 text-sm"
+            style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}
+          >
+            <option value="">批量改状态…</option>
+            {STATUS_ORDER.map((s) => (
+              <option key={s} value={s}>
+                {STATUS_LABEL_ZH[s]}
+              </option>
+            ))}
+          </select>
+          {tags.length > 0 && (
+            <select
+              value=""
+              onChange={onBulkTag}
+              className="rounded-md border px-2 py-1 text-sm"
+              style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}
+            >
+              <option value="">批量打标签…</option>
+              {tags.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          )}
+          <button
+            type="button"
+            onClick={onBulkDelete}
+            className="rounded-md border px-3 py-1 text-sm"
+            style={{ borderColor: 'var(--alert)', color: 'var(--alert)' }}
+          >
+            批量删除
+          </button>
+          <button
+            type="button"
+            onClick={() => setRowSelection({})}
+            className="ml-auto text-sm"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            取消选择
+          </button>
+        </div>
+      )}
+
       {importMsg && (
         <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
           {importMsg}
         </p>
       )}
       <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-        提示:点击单元格可直接编辑,Enter 下移、Tab 右移、Esc 取消;点最左箭头展开时间线与联系人;薪资等结构化字段用右侧
+        提示:点击单元格可直接编辑,Enter 下移、Tab 右移、Esc 取消;勾选行可批量操作;点箭头展开时间线与联系人;薪资等结构化字段用右侧
         <IconEdit size={12} className="mx-1 inline" /> 详情编辑。
       </p>
 
@@ -393,6 +525,7 @@ export function TablePage() {
                       style={{
                         borderBottom: '1px solid var(--border)',
                         borderLeft: `3px solid ${TIMEOUT_COLORS[level]}`,
+                        background: row.getIsSelected() ? 'var(--bg)' : undefined,
                       }}
                     >
                       {row.getVisibleCells().map((cell) => (
