@@ -41,3 +41,6 @@ dev-dist
 # Capacitor native projects (generated in CI for APK build)
 /android
 /ios
+
+# electron-builder output
+/release

@@ -1,0 +1,80 @@
+name: Release (APK + Desktop)
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: npm ci
+      - name: Build web (Capacitor base, no service worker)
+        run: npm run build
+        env:
+          CAP: '1'
+      - run: npx cap add android
+      - run: npx cap sync android
+      - name: Build debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+      - run: cp android/app/build/outputs/apk/debug/app-debug.apk "resume-tracker-${{ github.ref_name }}.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: resume-tracker-*.apk
+      - if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: resume-tracker-*.apk
+          name: ${{ github.ref_name }}
+
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            pattern: release/*.dmg
+          - os: windows-latest
+            pattern: release/*.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Build web (Capacitor base, no service worker)
+        run: npm run build
+        env:
+          CAP: '1'
+      - name: Build desktop installer
+        run: npx electron-builder --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          path: ${{ matrix.pattern }}
+      - if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.pattern }}
+          name: ${{ github.ref_name }}
