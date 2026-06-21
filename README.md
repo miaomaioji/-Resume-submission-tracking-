@@ -2,6 +2,8 @@
 
 本地优先(local-first)的简历投递与面试管理工具。数据全部保存在浏览器本地(IndexedDB),不上传服务器;可安装为 PWA 在手机 / 桌面离线使用。
 
+**在线使用**:<https://miaomaioji.github.io/-Resume-submission-tracking-/>
+
 > 🚧 开发中。完整设计与里程碑见 [docs/PLAN.md](docs/PLAN.md)。
 
 ## 功能(规划)

@@ -5,9 +5,9 @@ import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 import { fileURLToPath, URL } from 'node:url'
 
-// base 用相对路径,便于在 GitHub Pages 子路径下部署;如部署到自定义域名根路径可改为 '/'
-export default defineConfig({
-  base: './',
+// 本地开发用根路径;构建时用 GitHub Pages 项目子路径(= 仓库名)
+export default defineConfig(({ command }) => ({
+  base: command === 'build' ? '/-Resume-submission-tracking-/' : '/',
   plugins: [
     react(),
     tailwindcss(),
@@ -32,4 +32,4 @@ export default defineConfig({
     environment: 'node',
     globals: true,
   },
-})
+}))
