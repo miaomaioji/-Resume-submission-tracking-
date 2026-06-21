@@ -19,6 +19,8 @@ export interface Repository {
   getSettings(): Promise<Settings>
   saveSettings(patch: Partial<Settings>): Promise<void>
   listChannels(): Promise<Channel[]>
+  addChannel(name: string): Promise<void>
+  deleteChannel(id: string): Promise<void>
   listContacts(applicationId: string): Promise<Contact[]>
   addContact(c: Omit<Contact, 'id'>): Promise<void>
   deleteContact(id: string): Promise<void>
@@ -117,6 +119,15 @@ class LocalRepository implements Repository {
 
   listChannels() {
     return db.channels.orderBy('order').toArray()
+  }
+
+  async addChannel(name: string) {
+    const count = await db.channels.count()
+    await db.channels.add({ id: uid(), name, order: count })
+  }
+
+  async deleteChannel(id: string) {
+    await db.channels.delete(id)
   }
 
   listContacts(applicationId: string) {
