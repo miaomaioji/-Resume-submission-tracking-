@@ -47,7 +47,6 @@
 | **测试/质量** | Vitest · ESLint · Prettier · TypeScript strict |
 | **多端打包** | PWA · Capacitor（Android APK）· Electron（macOS / Windows 桌面） |
 
-> 说明:本项目为 **React**(非 Vue),数据层为 **IndexedDB**(非 LocalStorage);下方架构图已按实际技术栈标注。
 
 ---
 
@@ -95,7 +94,6 @@ flowchart TD
     TABLE -->|"7 增/删/改 → 写入持久化"| DB
 ```
 
-> 注:模板里的 “Vue Router / LocalStorage” 已按本项目真实技术栈替换为 **React Router / IndexedDB**。
 
 ---
 
