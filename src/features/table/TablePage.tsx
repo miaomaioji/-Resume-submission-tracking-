@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { Fragment, type ChangeEvent, useMemo, useRef, useState } from 'react'
 import {
   createColumnHelper,
   flexRender,
@@ -8,14 +8,28 @@ import {
   useReactTable,
   type SortingState,
 } from '@tanstack/react-table'
-import { IconCopy, IconEdit, IconPlus, IconSearch, IconTrash } from '@tabler/icons-react'
-import { useApplications, useSettings } from '@/hooks/useData'
+import dayjs from 'dayjs'
+import {
+  IconChevronDown,
+  IconChevronRight,
+  IconCopy,
+  IconDownload,
+  IconEdit,
+  IconPlus,
+  IconSearch,
+  IconTrash,
+  IconUpload,
+} from '@tabler/icons-react'
+import { useApplications, useChannels, useSettings } from '@/hooks/useData'
 import { repo } from '@/db/repository'
 import { migrateLegacy } from '@/db/migrate-legacy'
-import { StatusBadge } from '@/components/StatusBadge'
+import { downloadBackup, exportBackup, importBackup } from '@/lib/backup'
 import { StatsCards } from './StatsCards'
 import { EntryForm } from '@/features/entry/EntryForm'
-import { formatDate, formatSalary } from '@/lib/format'
+import { EditableCell } from './EditableCell'
+import { DetailPanel } from './DetailPanel'
+import { EDITABLE_IDS, GridContext, type EditPos, type GridApi } from './grid'
+import { formatSalary } from '@/lib/format'
 import { TIMEOUT_COLORS, timeoutLevel } from '@/domain/timeout'
 import { STATUS_LABEL_ZH, STATUS_ORDER, type Status } from '@/domain/enums'
 import type { Application } from '@/domain/types'
@@ -25,27 +39,39 @@ const columnHelper = createColumnHelper<Application>()
 export function TablePage() {
   const apps = useApplications()
   const settings = useSettings()
+  const channels = useChannels()
   const [sorting, setSorting] = useState<SortingState>([])
   const [globalFilter, setGlobalFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<Status | ''>('')
   const [formOpen, setFormOpen] = useState(false)
-  const [editing, setEditing] = useState<Application | undefined>()
+  const [editingApp, setEditingApp] = useState<Application | undefined>()
   const [initial, setInitial] = useState<Partial<Application> | undefined>()
   const [importMsg, setImportMsg] = useState('')
+  const [edit, setEdit] = useState<EditPos | null>(null)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const data = useMemo(
     () => (statusFilter ? apps.filter((a) => a.status === statusFilter) : apps),
     [apps, statusFilter],
   )
 
+  function toggleExpand(id: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
   function onAdd() {
-    setEditing(undefined)
+    setEditingApp(undefined)
     setInitial(undefined)
     setFormOpen(true)
   }
   function onCopyLast() {
     const last = apps[0]
-    setEditing(undefined)
+    setEditingApp(undefined)
     setInitial(
       last
         ? {
@@ -61,8 +87,8 @@ export function TablePage() {
     )
     setFormOpen(true)
   }
-  function onEdit(app: Application) {
-    setEditing(app)
+  function onEditRow(app: Application) {
+    setEditingApp(app)
     setInitial(undefined)
     setFormOpen(true)
   }
@@ -70,52 +96,78 @@ export function TablePage() {
     if (!confirm(`确认删除「${app.company} · ${app.position}」?`)) return
     await repo.softDeleteApplication(app.id)
   }
-  async function onImport() {
+  async function onImportLegacy() {
     const res = await migrateLegacy()
-    setImportMsg(res.found === 0 ? '未发现旧版数据' : `导入 ${res.imported}/${res.found} 条`)
+    setImportMsg(res.found === 0 ? '未发现旧版数据' : `导入旧版 ${res.imported}/${res.found} 条`)
+  }
+  async function onExport() {
+    downloadBackup(await exportBackup())
+  }
+  async function onImportFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const res = await importBackup(await file.text(), 'merge')
+      setImportMsg(`已合并导入 ${res.applications} 条`)
+    } catch (err) {
+      setImportMsg('导入失败:' + (err as Error).message)
+    }
+    e.target.value = ''
   }
 
   const columns = useMemo(
     () => [
+      columnHelper.display({
+        id: 'expander',
+        header: '',
+        cell: ({ row }) => (
+          <button
+            type="button"
+            onClick={() => toggleExpand(row.original.id)}
+            className="rounded p-1"
+            style={{ color: 'var(--text-muted)' }}
+            aria-label="展开详情"
+          >
+            {expanded.has(row.original.id) ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
+          </button>
+        ),
+      }),
       columnHelper.accessor('company', {
         header: '公司',
-        cell: (i) => <span className="font-medium">{i.getValue()}</span>,
+        cell: (i) => <EditableCell app={i.row.original} field="company" type="text" />,
       }),
-      columnHelper.accessor('position', { header: '岗位' }),
-      columnHelper.accessor('jobType', { header: '类型', cell: (i) => i.getValue() ?? '—' }),
-      columnHelper.accessor('channel', { header: '渠道', cell: (i) => i.getValue() ?? '—' }),
+      columnHelper.accessor('position', {
+        header: '岗位',
+        cell: (i) => <EditableCell app={i.row.original} field="position" type="text" />,
+      }),
+      columnHelper.accessor('jobType', {
+        header: '类型',
+        cell: (i) => <EditableCell app={i.row.original} field="jobType" type="jobType" />,
+      }),
+      columnHelper.accessor('channel', {
+        header: '渠道',
+        cell: (i) => <EditableCell app={i.row.original} field="channel" type="channel" />,
+      }),
       columnHelper.accessor('status', {
         header: '状态',
-        cell: (i) => <StatusBadge status={i.getValue()} />,
+        cell: (i) => <EditableCell app={i.row.original} field="status" type="status" />,
       }),
       columnHelper.display({ id: 'salary', header: '薪资', cell: ({ row }) => formatSalary(row.original) }),
-      columnHelper.accessor('location', { header: '地点', cell: (i) => i.getValue() ?? '—' }),
-      columnHelper.accessor('appliedAt', { header: '投递', cell: (i) => formatDate(i.getValue()) }),
+      columnHelper.accessor('location', {
+        header: '地点',
+        cell: (i) => <EditableCell app={i.row.original} field="location" type="text" />,
+      }),
+      columnHelper.accessor('appliedAt', {
+        header: '投递',
+        cell: (i) => <EditableCell app={i.row.original} field="appliedAt" type="date" />,
+      }),
       columnHelper.accessor('nextFollowUpAt', {
         header: '下次跟进',
-        cell: (i) => {
-          const v = i.getValue()
-          if (!v) return '—'
-          const label = i.row.original.nextActionLabel
-          return (
-            <div>
-              <div>{formatDate(v)}</div>
-              {label && (
-                <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                  {label}
-                </div>
-              )}
-            </div>
-          )
-        },
+        cell: (i) => <EditableCell app={i.row.original} field="nextFollowUpAt" type="date" />,
       }),
       columnHelper.accessor('notes', {
         header: '备注',
-        cell: (i) => (
-          <span className="line-clamp-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-            {i.getValue() ?? ''}
-          </span>
-        ),
+        cell: (i) => <EditableCell app={i.row.original} field="notes" type="text" />,
       }),
       columnHelper.display({
         id: 'actions',
@@ -124,10 +176,10 @@ export function TablePage() {
           <div className="flex justify-end gap-1">
             <button
               type="button"
-              onClick={() => onEdit(row.original)}
+              onClick={() => onEditRow(row.original)}
               className="rounded p-1"
               style={{ color: 'var(--text-muted)' }}
-              aria-label="编辑"
+              aria-label="编辑详情"
             >
               <IconEdit size={16} />
             </button>
@@ -144,7 +196,7 @@ export function TablePage() {
         ),
       }),
     ],
-    [],
+    [expanded],
   )
 
   const table = useReactTable({
@@ -157,6 +209,60 @@ export function TablePage() {
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
   })
+
+  const gridApi: GridApi = useMemo(() => {
+    function neighbor(rowId: string, colId: string, move: 'tab' | 'shiftTab' | 'down'): EditPos | null {
+      const rows = table.getRowModel().rows
+      const r = rows.findIndex((x) => x.original.id === rowId)
+      const c = EDITABLE_IDS.indexOf(colId)
+      if (r < 0 || c < 0) return null
+      if (move === 'tab') {
+        if (c < EDITABLE_IDS.length - 1) return { rowId, colId: EDITABLE_IDS[c + 1] }
+        if (r < rows.length - 1) return { rowId: rows[r + 1].original.id, colId: EDITABLE_IDS[0] }
+        return null
+      }
+      if (move === 'shiftTab') {
+        if (c > 0) return { rowId, colId: EDITABLE_IDS[c - 1] }
+        if (r > 0) return { rowId: rows[r - 1].original.id, colId: EDITABLE_IDS[EDITABLE_IDS.length - 1] }
+        return null
+      }
+      if (r < rows.length - 1) return { rowId: rows[r + 1].original.id, colId }
+      return null
+    }
+    return {
+      edit,
+      channels,
+      startEdit: (rowId, colId) => setEdit({ rowId, colId }),
+      cancel: () => setEdit(null),
+      commitMove: async (app, field, type, raw, move) => {
+        try {
+          if (type === 'status') {
+            if (raw && raw !== app.status) await repo.changeStatus(app.id, raw as Status)
+          } else if ((field === 'company' || field === 'position') && !raw.trim()) {
+            // 必填项不允许清空,忽略本次提交
+          } else {
+            const patch: Record<string, unknown> = {}
+            if (type === 'number') {
+              const n = parseFloat(raw)
+              patch[field] = Number.isFinite(n) ? n : undefined
+            } else if (type === 'date') {
+              patch[field] = raw ? dayjs(raw).toISOString() : undefined
+            } else {
+              patch[field] = raw.trim() || undefined
+            }
+            await repo.updateApplication(app.id, patch as Partial<Application>)
+          }
+        } finally {
+          if (move === 'none') {
+            // 仅当仍停留在本单元格时才关闭(避免异步提交覆盖刚点开的另一个单元格)
+            setEdit((prev) => (prev?.rowId === app.id && prev?.colId === field ? null : prev))
+          } else {
+            setEdit(neighbor(app.id, field, move))
+          }
+        }
+      },
+    }
+  }, [edit, channels, table])
 
   return (
     <div className="space-y-4">
@@ -190,10 +296,35 @@ export function TablePage() {
             </option>
           ))}
         </select>
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={onImport}
+            onClick={onExport}
+            className="flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm"
+            style={{ borderColor: 'var(--border)' }}
+          >
+            <IconDownload size={15} />
+            导出备份
+          </button>
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm"
+            style={{ borderColor: 'var(--border)' }}
+          >
+            <IconUpload size={15} />
+            导入备份
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="application/json"
+            className="hidden"
+            onChange={onImportFile}
+          />
+          <button
+            type="button"
+            onClick={onImportLegacy}
             className="rounded-md border px-3 py-1.5 text-sm"
             style={{ borderColor: 'var(--border)' }}
           >
@@ -224,65 +355,79 @@ export function TablePage() {
           {importMsg}
         </p>
       )}
+      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+        提示:点击单元格可直接编辑,Enter 下移、Tab 右移、Esc 取消;点最左箭头展开时间线与联系人;薪资等结构化字段用右侧
+        <IconEdit size={12} className="mx-1 inline" /> 详情编辑。
+      </p>
 
-      <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--border)' }}>
-        <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
-          <thead style={{ background: 'var(--bg)' }}>
-            {table.getHeaderGroups().map((hg) => (
-              <tr key={hg.id}>
-                {hg.headers.map((h) => (
-                  <th
-                    key={h.id}
-                    onClick={h.column.getToggleSortingHandler()}
-                    className="select-none px-3 py-2 text-left text-xs font-medium uppercase tracking-wide"
-                    style={{
-                      color: 'var(--text-muted)',
-                      borderBottom: '1px solid var(--border)',
-                      cursor: h.column.getCanSort() ? 'pointer' : 'default',
-                    }}
-                  >
-                    {flexRender(h.column.columnDef.header, h.getContext())}
-                    {{ asc: ' ↑', desc: ' ↓' }[h.column.getIsSorted() as string] ?? ''}
-                  </th>
-                ))}
-              </tr>
-            ))}
-          </thead>
-          <tbody>
-            {table.getRowModel().rows.map((row) => {
-              const level = timeoutLevel(row.original, settings)
-              return (
-                <tr
-                  key={row.id}
-                  style={{
-                    borderBottom: '1px solid var(--border)',
-                    borderLeft: `3px solid ${TIMEOUT_COLORS[level]}`,
-                  }}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-3 py-2 align-middle">
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
+      <GridContext.Provider value={gridApi}>
+        <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--border)' }}>
+          <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
+            <thead style={{ background: 'var(--bg)' }}>
+              {table.getHeaderGroups().map((hg) => (
+                <tr key={hg.id}>
+                  {hg.headers.map((h) => (
+                    <th
+                      key={h.id}
+                      onClick={h.column.getToggleSortingHandler()}
+                      className="select-none px-3 py-2 text-left text-xs font-medium uppercase tracking-wide"
+                      style={{
+                        color: 'var(--text-muted)',
+                        borderBottom: '1px solid var(--border)',
+                        cursor: h.column.getCanSort() ? 'pointer' : 'default',
+                      }}
+                    >
+                      {flexRender(h.column.columnDef.header, h.getContext())}
+                      {{ asc: ' ↑', desc: ' ↓' }[h.column.getIsSorted() as string] ?? ''}
+                    </th>
                   ))}
                 </tr>
-              )
-            })}
-            {table.getRowModel().rows.length === 0 && (
-              <tr>
-                <td
-                  colSpan={columns.length}
-                  className="px-3 py-12 text-center text-sm"
-                  style={{ color: 'var(--text-muted)' }}
-                >
-                  暂无记录,点击「新增投递」开始记录
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+              ))}
+            </thead>
+            <tbody>
+              {table.getRowModel().rows.map((row) => {
+                const level = timeoutLevel(row.original, settings)
+                return (
+                  <Fragment key={row.id}>
+                    <tr
+                      style={{
+                        borderBottom: '1px solid var(--border)',
+                        borderLeft: `3px solid ${TIMEOUT_COLORS[level]}`,
+                      }}
+                    >
+                      {row.getVisibleCells().map((cell) => (
+                        <td key={cell.id} className="px-3 py-2 align-middle">
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </td>
+                      ))}
+                    </tr>
+                    {expanded.has(row.original.id) && (
+                      <tr>
+                        <td colSpan={columns.length} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <DetailPanel app={row.original} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                )
+              })}
+              {table.getRowModel().rows.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={columns.length}
+                    className="px-3 py-12 text-center text-sm"
+                    style={{ color: 'var(--text-muted)' }}
+                  >
+                    暂无记录,点击「新增投递」开始记录
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </GridContext.Provider>
 
-      {formOpen && <EntryForm editing={editing} initial={initial} onClose={() => setFormOpen(false)} />}
+      {formOpen && <EntryForm editing={editingApp} initial={initial} onClose={() => setFormOpen(false)} />}
     </div>
   )
 }

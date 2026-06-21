@@ -15,3 +15,13 @@ export function useSettings() {
 export function useChannels() {
   return useLiveQuery(() => repo.listChannels(), [], [])
 }
+
+/** 某条投递的时间线事件(按时间升序)。 */
+export function useEvents(appId: string) {
+  return useLiveQuery(() => repo.listEvents(appId), [appId], [])
+}
+
+/** 某条投递的联系人。 */
+export function useContacts(appId: string) {
+  return useLiveQuery(() => repo.listContacts(appId), [appId], [])
+}

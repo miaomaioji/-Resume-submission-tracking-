@@ -17,4 +17,6 @@ export const router = createBrowserRouter([
       { path: 'settings', element: <SettingsPage /> },
     ],
   },
-])
+], {
+  future: { v7_relativeSplatPath: true },
+})

@@ -1,7 +1,7 @@
 import { db } from './schema'
 import { DEFAULT_CHANNELS, DEFAULT_TIMEOUT, type Status } from '@/domain/enums'
 import { nowIso, uid } from '@/domain/id'
-import type { Application, Channel, Settings, TimelineEvent } from '@/domain/types'
+import type { Application, Channel, Contact, Settings, TimelineEvent } from '@/domain/types'
 
 /**
  * 数据访问抽象。MVP 用本地(Dexie)实现;未来自建后端时新增远端实现,UI/领域层不变。
@@ -19,6 +19,10 @@ export interface Repository {
   getSettings(): Promise<Settings>
   saveSettings(patch: Partial<Settings>): Promise<void>
   listChannels(): Promise<Channel[]>
+  listContacts(applicationId: string): Promise<Contact[]>
+  addContact(c: Omit<Contact, 'id'>): Promise<void>
+  deleteContact(id: string): Promise<void>
+  addNote(applicationId: string, note: string): Promise<void>
 }
 
 export const SETTINGS_DEFAULT: Settings = {
@@ -105,6 +109,23 @@ class LocalRepository implements Repository {
 
   listChannels() {
     return db.channels.orderBy('order').toArray()
+  }
+
+  listContacts(applicationId: string) {
+    return db.contacts.where('applicationId').equals(applicationId).toArray()
+  }
+
+  async addContact(c: Omit<Contact, 'id'>) {
+    await db.contacts.add({ ...c, id: uid() })
+  }
+
+  async deleteContact(id: string) {
+    await db.contacts.delete(id)
+  }
+
+  async addNote(applicationId: string, note: string) {
+    const ts = nowIso()
+    await db.events.add({ id: uid(), applicationId, type: 'note', at: ts, note, createdAt: ts })
   }
 }
 
