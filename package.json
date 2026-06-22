@@ -1,7 +1,7 @@
 {
   "name": "resume-tracker",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.1.3",
   "type": "module",
   "description": "本地优先的简历投递与面试管理工具(开源,GPL-3.0)",
   "license": "GPL-3.0-or-later",
